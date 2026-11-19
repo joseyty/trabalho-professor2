@@ -1,7 +1,8 @@
 from datetime import datetime, timedelta, timezone
-from fastapi import FastAPI, Depends, Header, HTTPException, Request
+from fastapi import FastAPI, Depends, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import IntegrityError
@@ -15,6 +16,8 @@ app = FastAPI(
     description="Carteira digital com autenticação, atomicidade e proteção contra duplicidade.",
     version="1.0.0",
 )
+
+security = HTTPBearer(auto_error=False)
 
 @app.on_event("startup")
 def startup():
@@ -48,12 +51,12 @@ async def integrity_error_handler(request, exc):
     return JSONResponse(status_code=409, content={"error": "CONFLITO_DADOS"})
 
 def current_user(
-    authorization: str | None = Header(default=None),
+    credentials: HTTPAuthorizationCredentials | None = Depends(security),
     db: Session = Depends(get_db),
 ):
-    if not authorization or not authorization.startswith("Bearer "):
+    if not credentials or credentials.scheme.lower() != "bearer":
         reject(401, "NAO_AUTENTICADO")
-    token = authorization[7:].strip()
+    token = credentials.credentials.strip()
     username = decode_token(token)
     if not username:
         reject(401, "NAO_AUTENTICADO")
@@ -168,7 +171,7 @@ def transfer(
 def audit(db: Session = Depends(get_db)):
     users_count = db.scalar(select(func.count(User.id))) or 0
     balances_sum = db.scalar(select(func.coalesce(func.sum(User.balance), 0))) or 0
-    transfers_count = db.scalar(select(func.count(Transfer.id)) ) or 0
+    transfers_count = db.scalar(select(func.count(Transfer.id))) or 0
     return {
         "usuarios": users_count,
         "somaSaldos": balances_sum,
